@@ -1,0 +1,4 @@
+docker pull stefanoamorelli/sec-edgar-mcp:latest
+
+docker run -e SEC_EDGAR_USER_AGENT="Your Name (your.email@domain.com)" \
+  stefanoamorelli/sec-edgar-mcp:latest
