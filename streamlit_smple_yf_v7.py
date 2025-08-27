@@ -1356,7 +1356,7 @@ def main():
         if ticker:
             try:
                 # Load CIK mapping JSON (adjust path or add your own mapping as needed)
-                mapping_path = ".\\company_tickers_exchange.json"
+                mapping_path = "company_tickers_exchange.json"
                 if os.path.exists(mapping_path):
                     with open(mapping_path, "r") as f:
                         CIK_dict = json.load(f)
