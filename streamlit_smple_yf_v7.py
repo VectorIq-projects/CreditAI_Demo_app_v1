@@ -1320,8 +1320,7 @@ def generate_print_report(ticker: str, all_data: Dict) -> str:
 
 def main():
     """Main Streamlit app"""
-    st.title("Financial Statement Analyzer with AI")
-    st.write("Enhanced analysis using semantic similarity search for improved context retrieval from 10-Q documents.")
+    st.title("CreditIQ - Credit Compliance report with AI")
 
     # Input Section: Ticker and filing source choice
     col1, col2 = st.columns([1, 2])
