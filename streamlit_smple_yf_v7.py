@@ -1,4 +1,3 @@
-
 import streamlit as st
 import pandas as pd
 import numpy as np
@@ -90,6 +89,10 @@ st.markdown("""
         border-radius: 6px;
         margin: 8px 0;
         border-left: 4px solid #ff9800;
+        line-height: 1.6;
+    }
+    .profitability-paragraph {
+        margin-bottom: 15px;
         line-height: 1.6;
     }
     @media print {
@@ -322,9 +325,11 @@ class AzureOpenAIAnalyzer:
         if not self.vector_index:
             return "Unable to create vector index for analysis"
 
-        # Prompts
+        # First get the currency scale
+        currency_prompt = """From the given 10-Q filing, identify and return the currency unit or scale used for financial figures (e.g., "in millions", "in thousands")—typically found near the balance sheet or income statement headings."""
+        
+        # Risk analysis prompts (without Currency Scale as a section)
         risk_sections = {
-            "Currency Scale": """From the given 10-Q filing, identify and return the currency unit or scale used for financial figures (e.g., "in millions", "in thousands")—typically found near the balance sheet or income statement headings.""",
             "Financial and Debt-Related Risks": """
             Role: "You are a financial analyst AI specializing in risk analysis using company 10-Q reports."
             Provide a comprehensive analysis in 2-3 sentences that includes: total debt, % of variable-rate debt, upcoming maturities; key debt facilities, hedging, covenants; and risks to liquidity, access to capital, or refinancing pressures. Write as a continuous narrative, not bullet points.
@@ -336,25 +341,29 @@ class AzureOpenAIAnalyzer:
 
         try:
             results = []
-            currency_response = self.query_vector_index(risk_sections["Currency Scale"], similarity_top_k=3)
-            if currency_response:
-                results.append(f"**Currency Scale**: The financial figures are presented {currency_response.strip()}.")
+            
+            # Get currency scale and format it as an inline sentence
+            currency_response = self.query_vector_index(currency_prompt, similarity_top_k=3)
+            if currency_response and currency_response.strip():
+                # Format as a simple sentence without bold formatting
+                results.append(f"The financial figures in the 10-Q filing are presented {currency_response.strip()}.")
                 results.append("")
+            
+            # Process other risk sections (without bold formatting)
             for section_name, prompt in risk_sections.items():
-                if section_name == "Currency Scale":
-                    continue
                 response = self.query_vector_index(prompt, similarity_top_k=3)
                 if response:
-                    results.append(f"**{section_name}**")
+                    results.append(f"**{section_name}:**")
                     results.append(response.strip())
                     results.append("")
+                    
             return "\n".join(results) if results else "No risk-related details found in the provided filing text."
         except Exception as e:
             logger.error(f"Error in risk analysis: {str(e)}")
             return "Unable to complete risk analysis due to an error"
 
     def analyze_liquidity(self, text: str) -> str:
-        """Analyze liquidity using prompts from Liquidity_summary_v2.py"""
+        """Analyze liquidity using prompts from Liquidity_summary_v2.py - formatted as bullets"""
         if not self.client:
             return "AI analysis unavailable - please check Azure OpenAI configuration"
 
@@ -392,21 +401,40 @@ class AzureOpenAIAnalyzer:
                 response = self.query_vector_index(prompt, similarity_top_k=3)
                 answers[key] = response if response else "Information not available"
 
+            # Format as bullet points following the sample format
             consolidated_prompt = f"""
-            Based on the following information extracted from a 10-Q filing, create a 4-5 sentence executive 
-            summary that flows as a continuous narrative (not bullet points):
+            Based on the following information extracted from a 10-Q filing, create a bullet-point summary 
+            formatted exactly as follows (use "- " prefix for each bullet point):
 
             1. Cash and Cash Equivalents: {answers.get('cash_equivalents', 'Not available')}
             2. 12-Month Liquidity Outlook: {answers.get('liquidity_runway', 'Not available')}
             3. Line of Credit Information: {answers.get('credit_facilities', 'Not available')}
             4. Going Concern Status: {answers.get('going_concern', 'Not available')}
 
-            Synthesize this into a cohesive paragraph addressing the company's current cash position, 
-            whether cash will last 12 months, credit facility details including maturity dates, 
-            and any going concern issues. Use specific figures and dates where available.
+            Create 4 bullet points, each starting with "- " that summarize:
+            1. Current cash position and date
+            2. Whether cash will last 12 months and management's expectations
+            3. Credit facility details including amount, usage, and maturity
+            4. Going concern status
+
+            Use specific figures and dates where available. Format each as a complete sentence.
             """
 
             final_summary = self.query_vector_index(consolidated_prompt, similarity_top_k=2)
+            
+            # If the response doesn't have bullet points, format it ourselves
+            if final_summary and not final_summary.startswith("- "):
+                # Try to parse and format as bullets
+                lines = final_summary.strip().split('\n')
+                formatted_bullets = []
+                for line in lines:
+                    line = line.strip()
+                    if line:
+                        if not line.startswith("- "):
+                            line = f"- {line}"
+                        formatted_bullets.append(line)
+                return "\n".join(formatted_bullets) if formatted_bullets else final_summary
+            
             return final_summary if final_summary else "Unable to generate liquidity summary"
         except Exception as e:
             logger.error(f"Error in liquidity analysis: {str(e)}")
@@ -426,7 +454,7 @@ class AzureOpenAIAnalyzer:
         Your task is to analyse the company's profit growth based on the provided 10Q filing report.
         Write in a concise and analytical tone, like an investor earnings summary. Do not list bullet points—compose it as a narrative reflection using concrete financial figures and trends from the filing.
         Include actual figures with units (e.g., $ millions, x coverage).
-        Provide 3-4 paragraphs focusing on the following aspects:
+        Provide 2-3 paragraphs focusing on the following aspects:
 
         1. Revenue Analysis: 
            - Identify total revenue and compare it to the previous quarter and the same quarter from the previous year.
@@ -459,15 +487,61 @@ class AzureOpenAIAnalyzer:
            - Analyze potential risks and opportunities that could affect future profitability.
            - Include actual figures with units (e.g., $ millions, x coverage).
 
-        Write this as a continuous narrative of 3-4 paragraphs, not as bullet points or numbered sections.
+        Write this as a continuous narrative of 2-3 paragraphs, not as bullet points or numbered sections.
+        Each paragraph should be separated by a clear line break for readability.
         """
 
         try:
             response = self.query_vector_index(prompt, similarity_top_k=2)
-            return response if response else "Unable to generate profitability analysis"
+            
+            # Format with proper paragraph spacing
+            if response:
+                # Split into paragraphs and ensure proper spacing
+                paragraphs = response.strip().split('\n\n')
+                if len(paragraphs) == 1:
+                    # If no double line breaks, try single line breaks
+                    paragraphs = response.strip().split('\n')
+                
+                # Format each paragraph with proper spacing
+                formatted_paragraphs = []
+                for para in paragraphs:
+                    para = para.strip()
+                    if para and len(para) > 50:  # Only include substantial paragraphs
+                        formatted_paragraphs.append(f'<p class="profitability-paragraph">{para}</p>')
+                
+                return ''.join(formatted_paragraphs) if formatted_paragraphs else response
+            
+            return "Unable to generate profitability analysis"
         except Exception as e:
             logger.error(f"Error in profitability analysis: {str(e)}")
             return "Unable to complete profitability analysis due to an error"
+
+    def analyze_cashflow(self, text: str) -> str:
+        """Analyze cash flow using prompts from Cashflow_summary_v1.py"""
+        if not self.client:
+            return "AI analysis unavailable - please check Azure OpenAI configuration"
+
+        if not self.vector_index:
+            self.vector_index = self.create_vector_index(text)
+        if not self.vector_index:
+            return "Unable to create vector index for analysis"
+
+        prompt = """
+        From the given 10-Q filing of a company, summarize the changes in the following cash flow activities in 3–4 sentences, focusing specifically on the *Cash Flow* section:
+
+        * Cash flow from operating activities
+        * Cash flow from investing activities
+        * Cash flow from financing activities
+
+        Include the starting amount, ending amount, comparison to the same period in the prior year, and explain the key reasons behind the changes.
+        """
+
+        try:
+            response = self.query_vector_index(prompt, similarity_top_k=2)
+            return response if response else "Unable to generate cash flow analysis"
+        except Exception as e:
+            logger.error(f"Error in cash flow analysis: {str(e)}")
+            return "Unable to complete cash flow analysis due to an error"
 
     def _get_default_risk_response(self) -> Dict:
         """Default response when AI analysis fails"""
@@ -1200,33 +1274,36 @@ def display_financial_statements(financial_data: Dict[str, pd.DataFrame], ticker
 def display_risk_analysis(risk_data: str):
     """Display AI-analyzed risks"""
     st.header("⚠️ Risk Analysis")
-    st.caption("AI-generated analysis from 10-Q document using vector embeddings")
+    st.caption("AI-generated analysis from 10-Q document")
 
-    st.markdown(f"""
-    <div class="ai-summary">
-        {risk_data}
-    </div>
-    """, unsafe_allow_html=True)
+    st.markdown(risk_data)
 
 def display_liquidity_analysis(liquidity_data: str):
     """Display AI-analyzed liquidity position"""
     st.header("💧 Liquidity Analysis")
-    st.caption("AI-generated analysis from 10-Q document using vector embeddings")
+    st.caption("AI-generated analysis from 10-Q document")
 
-    st.markdown(f"""
-    <div class="ai-summary">
-        {liquidity_data}
-    </div>
-    """, unsafe_allow_html=True)
+    st.markdown(liquidity_data)
 
 def display_profitability_analysis(profitability_data: str):
     """Display AI-analyzed profitability"""
     st.header("📈 Profitability Analysis")
-    st.caption("AI-generated analysis from 10-Q document using vector embeddings")
+    st.caption("AI-generated analysis from 10-Q document")
 
     st.markdown(f"""
     <div class="ai-summary">
         {profitability_data}
+    </div>
+    """, unsafe_allow_html=True)
+
+def display_cashflow_analysis(cashflow_data: str):
+    """Display AI-analyzed cash flow"""
+    st.header("💰 Cash Flow Analysis")
+    st.caption("AI-generated analysis from 10-Q document")
+
+    st.markdown(f"""
+    <div class="ai-summary">
+        {cashflow_data}
     </div>
     """, unsafe_allow_html=True)
 
@@ -1313,6 +1390,13 @@ def generate_print_report(ticker: str, all_data: Dict) -> str:
         <div class="analysis-section">
             {all_data['profitability_analysis']}
         </div>
+
+        <div class="section-header">
+            <h2>5. Cash Flow Analysis</h2>
+        </div>
+        <div class="analysis-section">
+            {all_data['cashflow_analysis']}
+        </div>
     </body>
     </html>
     """
@@ -1321,7 +1405,6 @@ def generate_print_report(ticker: str, all_data: Dict) -> str:
 def main():
     """Main Streamlit app"""
     st.title("CreditIQ - Credit Compliance report with AI")
-
     # Input Section: Ticker and filing source choice
     col1, col2 = st.columns([1, 2])
 
@@ -1433,6 +1516,9 @@ def main():
             with st.spinner("Analyzing profitability using vector embeddings..."):
                 profitability_analysis = analyzer.analyze_profitability(raw_text)
 
+            with st.spinner("Analyzing cash flow using vector embeddings..."):
+                cashflow_analysis = analyzer.analyze_cashflow(raw_text)
+
             # Prepare HTML snippets for print
             # Financial tables
             bal_html = fetcher.format_financial_table(financial_data).to_html(index=False, escape=False, na_rep="")
@@ -1440,8 +1526,8 @@ def main():
             cf_html = fetcher.format_cash_flow(financial_data).to_html(index=False, escape=False, na_rep="")
             tables_html = f"<h3>Balance Sheet</h3>{bal_html}<h3>Income Statement</h3>{inc_html}<h3>Cash Flow</h3>{cf_html}"
 
-            # Main tabs for interactive display
-            tab1, tab2, tab3, tab4 = st.tabs(["Financial Statements", "Risk Analysis", "Liquidity", "Profitability"])
+            # Main tabs for interactive display - Added Cash Flow tab
+            tab1, tab2, tab3, tab4, tab5 = st.tabs(["Financial Statements", "Risk Analysis", "Liquidity", "Profitability", "Cash Flow"])
 
             with tab1:
                 display_financial_statements(financial_data, ticker)
@@ -1455,6 +1541,9 @@ def main():
             with tab4:
                 display_profitability_analysis(profitability_analysis)
 
+            with tab5:
+                display_cashflow_analysis(cashflow_analysis)
+
             # Generate full report for download
             st.markdown("---")
             st.subheader("📥 Export Report")
@@ -1464,7 +1553,8 @@ def main():
                 'tables': tables_html,
                 'risk_analysis': risk_analysis.replace('\n', '<br>'),
                 'liquidity_analysis': liquidity_analysis.replace('\n', '<br>'),
-                'profitability_analysis': profitability_analysis.replace('\n', '<br>')
+                'profitability_analysis': profitability_analysis.replace('\n', '<br>'),
+                'cashflow_analysis': cashflow_analysis.replace('\n', '<br>')
             }
             report_html = generate_print_report(ticker, all_html)
 
